@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+mkdir -p build
+cd build
+qmake6 ../drip.pro
+make -j2

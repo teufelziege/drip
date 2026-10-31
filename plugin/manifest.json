@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"tlindsey.drip","name":"Drip","version":"1.0.0","author":"tlindsey","description":"A little water friend tracking estimated water per local Codex prompt","kinds":["bar-widget"],"entryPoints":{"barWidget":"BarWidget.qml"},"barWidget":{"displayName":"Drip","description":"Estimated AI water use today","category":"System","allowMultiple":false}}
