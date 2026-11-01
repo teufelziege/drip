@@ -76,4 +76,79 @@ class CounterTests(unittest.TestCase):
             log.write_text(log.read_text()+'{}\n')
             self.assertEqual(json.loads(subprocess.check_output(cmd))['running'],0)
 
+    def test_parallel_sessions_and_activity_heartbeat(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); sessions=root/'sessions'; sessions.mkdir()
+            now=datetime.now(timezone.utc)
+            def record(kind, identifier, trigger='user'):
+                return json.dumps({'type':'event_msg','timestamp':now.isoformat(),
+                    'payload':{'type':kind,'turn_id':identifier,
+                    'turn_attribution':{'turn_trigger':trigger}}})+'\\n'
+            a=sessions/'a.jsonl'; b=sessions/'b.jsonl'
+            a.write_text(record('task_started','shared'))
+            b.write_text(record('task_started','shared'))
+            state=root/'state.json'
+            cmd=[BINARY,'--sessions',str(sessions),'--state',str(state)]
+            def run(): return json.loads(subprocess.check_output(cmd))
+            self.assertEqual(run()['prompts'],2)
+            self.assertEqual(run()['running'],2)
+            with a.open('a') as out: out.write(record('task_complete','shared'))
+            self.assertEqual(run()['running'],1)
+            data=json.loads(state.read_text())
+            for entry in data['active'].values(): entry['seen']=0
+            state.write_text(json.dumps(data))
+            with b.open('a') as out: out.write(record('agent_message','shared'))
+            self.assertEqual(run()['running'],1)
+            self.assertEqual(run()['prompts'],2)
+
+    def test_append_short_log_does_not_replay_active_turn(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); sessions=root/'sessions'; sessions.mkdir()
+            log=sessions/'short.jsonl'
+            now=datetime.now(timezone.utc).isoformat()
+            def record(kind, identifier):
+                return json.dumps({'type':'event_msg','timestamp':now,
+                    'payload':{'type':kind,'turn_id':identifier,
+                    'turn_attribution':{'turn_trigger':'user'}}})+'\\n'
+            log.write_text(record('task_started','first'))
+            state=root/'state.json'
+            cmd=[BINARY,'--sessions',str(sessions),'--state',str(state)]
+            def run(): return json.loads(subprocess.check_output(cmd))
+            self.assertEqual(run()['running'],1)
+            with log.open('a') as out: out.write(record('task_complete','first'))
+            self.assertEqual(run()['running'],0)
+            with log.open('a') as out: out.write(record('task_started','second'))
+            self.assertEqual(run()['running'],1)
+            self.assertEqual(run()['prompts'],2)
+
+    def test_invalid_state_schema_and_rate_preserved(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); sessions=root/'sessions'; sessions.mkdir()
+            state=root/'state.json'
+            cmd=[BINARY,'--sessions',str(sessions),'--state',str(state)]
+            for invalid in ({'offsets':[]},{'events':[]},{'active':[]},
+                            {'files':[]},{'ml_per_prompt':-1},
+                            {'ml_per_prompt':'wrong'}):
+                serialized=json.dumps(invalid)
+                state.write_text(serialized)
+                self.assertNotEqual(subprocess.run(cmd,capture_output=True).returncode,0)
+                self.assertEqual(state.read_text(),serialized)
+
+    def test_day_boundary_and_retention(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); sessions=root/'sessions'; sessions.mkdir()
+            log=sessions/'history.jsonl'
+            now=datetime.now().astimezone()
+            def event(identifier, moment):
+                return json.dumps({'type':'event_msg','timestamp':moment.isoformat(),
+                    'payload':{'type':'task_started','turn_id':identifier,
+                    'turn_attribution':{'turn_trigger':'user'}}})+'\\n'
+            log.write_text(event('today',now)+event('yesterday',now-timedelta(days=1))
+                           +event('old',now-timedelta(days=10)))
+            state=root/'state.json'
+            cmd=[BINARY,'--sessions',str(sessions),'--state',str(state)]
+            self.assertEqual(json.loads(subprocess.check_output(cmd))['prompts'],1)
+            data=json.loads(state.read_text())
+            self.assertEqual(len(data['events']),2)
+
 if __name__=='__main__': unittest.main()
