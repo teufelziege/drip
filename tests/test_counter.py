@@ -44,13 +44,13 @@ class CounterTests(unittest.TestCase):
             def event(identifier, when):
                 return json.dumps({'type':'event_msg','timestamp':when.isoformat(timespec='milliseconds'),
                     'payload':{'type':'task_started','turn_id':identifier,
-                    'turn_attribution':{'turn_trigger':'user'}}})+'\\n'
+                    'turn_attribution':{'turn_trigger':'user'}}})+'\n'
             now = datetime.now(timezone.utc)
             log.write_text(event('first', now))
             def run(): return json.loads(subprocess.check_output(cmd))
             self.assertEqual(run()['prompts'], 1)
             replacement = sessions/'replacement'
-            replacement.write_text(event('second', now) + ' '*200 + '\\n')
+            replacement.write_text(event('second', now) + ' '*200 + '\n')
             replacement.replace(log)
             self.assertEqual(run()['prompts'], 2)
             saved = json.loads(state.read_text())
@@ -66,7 +66,7 @@ class CounterTests(unittest.TestCase):
             now=datetime.now(timezone.utc)
             log.write_text(json.dumps({'type':'event_msg','timestamp':now.isoformat(),
                 'payload':{'type':'task_started','turn_id':'one',
-                'turn_attribution':{'turn_trigger':'user'}}})+'\\n')
+                'turn_attribution':{'turn_trigger':'user'}}})+'\n')
             state=root/'state.json'
             cmd=[BINARY,'--sessions',str(sessions),'--state',str(state)]
             self.assertEqual(json.loads(subprocess.check_output(cmd))['running'],1)
