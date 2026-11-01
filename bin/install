@@ -2,27 +2,51 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bin/build
-python3 tests/test_counter.py
+python3 -m unittest discover -s tests -p 'test_*.py'
 omarchy plugin validate plugin
 python3 - <<'PY'
 from pathlib import Path
 from datetime import datetime
-import shutil, json
+import shutil, json, os
 home=Path.home()
 target=home/'.config/omarchy/plugins/tlindsey.drip'
-target.mkdir(parents=True,exist_ok=True)
-shutil.copytree('plugin',target,dirs_exist_ok=True)
-shutil.copy2('build/drip',target/'drip.new')
-(target/'drip.new').replace(target/'drip')
+target.parent.mkdir(parents=True,exist_ok=True)
+staging=target.with_name(target.name+'.staging')
+if staging.exists(): shutil.rmtree(staging)
+staging.mkdir()
+shutil.copytree('plugin',staging,dirs_exist_ok=True)
+shutil.copy2('build/drip',staging/'drip')
 p=home/'.config/omarchy/shell.json'
-s=json.loads(p.read_text())
-p.with_name('shell.json.bak.drip.'+datetime.now().strftime('%Y%m%d-%H%M%S')).write_text(p.read_text())
+original=p.read_bytes()
+s=json.loads(original)
 layout=s.setdefault('bar',{}).setdefault('layout',{})
-if not any(e.get('id')=='tlindsey.drip' for entries in layout.values() if isinstance(entries,list) for e in entries):
+if not any(isinstance(e,dict) and e.get('id')=='tlindsey.drip'
+           for entries in layout.values() if isinstance(entries,list) for e in entries):
     layout.setdefault('centerBegin',[]).append({'id':'tlindsey.drip'})
+previous=target.with_name(target.name+'.previous')
+if previous.exists(): shutil.rmtree(previous)
+backup=p.with_name('shell.json.bak.drip.'+datetime.now().strftime('%Y%m%d-%H%M%S'))
+backup.write_bytes(original)
 temporary=p.with_name('shell.json.drip.tmp')
 temporary.write_text(json.dumps(s,indent=2)+'\n')
-temporary.replace(p)
+moved=False
+try:
+    if target.exists():
+        target.rename(previous)
+        moved=True
+    staging.rename(target)
+    temporary.replace(p)
+except Exception:
+    if target.exists(): shutil.rmtree(target)
+    if moved and previous.exists(): previous.rename(target)
+    # Restore shell configuration even if replacement partially succeeded.
+    restore=p.with_name('shell.json.drip.restore.tmp')
+    restore.write_bytes(original)
+    restore.replace(p)
+    raise
+finally:
+    if temporary.exists(): temporary.unlink()
+    if staging.exists(): shutil.rmtree(staging)
 PY
 omarchy-shell shell rescanPlugins
 printf 'Drip installed. If updating, run: omarchy restart shell\n'

@@ -2,6 +2,12 @@
 #include <QDateTime>
 #include <QDirIterator>
 #include <QFile>
+#include <QFileInfo>
+#include <QFileDevice>
+#include <QCryptographicHash>
+#include <QJsonArray>
+#include <QSet>
+#include <QStorageInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLockFile>
@@ -20,7 +26,7 @@ int main(int argc, char **argv) {
     const QString statePath = option("--state", home + "/.local/state/drip/state.json");
     auto fail = [](QString message) { QTextStream(stderr) << message << '\n'; return 1; };
     if (!QDir(sessions).exists()) return fail("Local Codex session directory is unavailable.");
-    QDir().mkpath(QFileInfo(statePath).absolutePath());
+    if (!QDir().mkpath(QFileInfo(statePath).absolutePath())) return fail("Cannot create state directory.");
     QLockFile lock(statePath + ".lock");
     if (!lock.tryLock(1000)) return fail("Drip state is busy.");
     QJsonObject state;
@@ -32,17 +38,21 @@ int main(int argc, char **argv) {
         if (error.error != QJsonParseError::NoError || !document.isObject()) return fail("Drip state is invalid; refusing to overwrite it.");
         state = document.object();
     }
+    if (state.contains("ml_per_prompt") && !state.value("ml_per_prompt").isDouble()) return fail("Invalid saved rate.");
     double rate = state.value("ml_per_prompt").toDouble(0.32);
+    if (!std::isfinite(rate) || rate < 0 || rate > 10000) return fail("Invalid saved rate.");
     if (args.contains("--rate")) {
         bool ok = false;
         rate = option("--rate", "").toDouble(&ok);
         if (!ok || !std::isfinite(rate) || rate < 0 || rate > 10000) return fail("Rate must be between 0 and 10000 mL.");
     }
+    for (const auto &key : {"offsets", "events", "active", "files"}) if (state.contains(key) && !state.value(key).isObject()) return fail("Invalid state schema.");
     QJsonObject offsets = state.value("offsets").toObject();
+    QJsonObject identities = state.value("files").toObject();
     QJsonObject events = state.value("events").toObject();
     QJsonObject active = state.value("active").toObject();
     // Replay once when upgrading so existing unfinished turns are discovered.
-    if (state.value("activity_version").toInt() != 1) offsets = {};
+    if (state.value("activity_version").toInt() != 3) { offsets = {}; identities = {}; active = {}; }
     const auto today = QDate::currentDate();
     int unreadable = 0;
     // Old conversations can receive new turns, so discover all files but read only appended bytes.
@@ -54,8 +64,23 @@ int main(int argc, char **argv) {
             QFile file(path);
             if (!file.open(QIODevice::ReadOnly)) { ++unreadable; continue; }
             qint64 offset = qint64(offsets.value(path).toDouble());
-            if (offset > file.size()) offset = 0;
+            const QFileInfo info(file);
+            
+            const QJsonObject previous = identities.value(path).toObject();
+            // A changed prefix catches same-size replacements; metadata detects shrinkage.
+            file.seek(0);
+            // Hash only the previously observed prefix. Appending to a short log
+            // must not look like replacement of its existing contents.
+            const qint64 prefixBytes = previous.contains("prefix_bytes")
+                ? qint64(previous.value("prefix_bytes").toDouble()) : qMin(qint64(4096), file.size());
+            const QString prefix = QString::fromLatin1(QCryptographicHash::hash(file.read(prefixBytes), QCryptographicHash::Sha256).toHex());
+            if (offset > file.size() || (previous.contains("prefix") && previous.value("prefix").toString() != prefix)
+                || (previous.contains("modified") && info.lastModified().toMSecsSinceEpoch() < previous.value("modified").toDouble())) {
+                offset = 0;
+                for (const auto &key : active.keys()) if (active.value(key).toObject().value("path").toString() == path) active.remove(key);
+            }
             if (!file.seek(offset)) { ++unreadable; continue; }
+            const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
             while (!file.atEnd()) {
                 qint64 start = file.pos();
                 QByteArray line = file.readLine();
@@ -68,22 +93,32 @@ int main(int argc, char **argv) {
                 if (activityId.isEmpty()) activityId = attribution.value("turn_id").toString();
                 const auto kind = payload.value("type").toString();
                 if (kind == "task_complete" || kind == "turn_aborted" || kind == "task_aborted") {
-                    if (!activityId.isEmpty()) active.remove(activityId);
-                    else {
-                        for (const auto &key : active.keys()) if (active.value(key).toString() == path) active.remove(key);
-                    }
+                    if (!activityId.isEmpty()) active.remove(path + ":" + activityId);
+                    else { /* An unidentifiable completion must not terminate unrelated turns. */ }
                 }
-                if (kind == "task_started" && attribution.value("turn_trigger") != "guardian_review" && !activityId.isEmpty()) active.insert(activityId, path);
+                if (kind == "task_started" && attribution.value("turn_trigger") != "guardian_review" && !activityId.isEmpty()) active.insert(path + ":" + activityId, QJsonObject{{"path", path}, {"seen", double(nowMs)}});
+                else if (!activityId.isEmpty() && active.contains(path + ":" + activityId) && kind != "task_complete" && kind != "turn_aborted" && kind != "task_aborted") {
+                    auto entry = active.value(path + ":" + activityId).toObject();
+                    entry.insert("seen", double(nowMs));
+                    active.insert(path + ":" + activityId, entry);
+                }
                 if (kind != "task_started" || attribution.value("turn_trigger") != "user") continue;
                 if (!attribution.value("initiating_agent_path").isNull() && !attribution.value("initiating_agent_path").toString().isEmpty()) continue;
                 QString id = payload.value("turn_id").toString();
                 if (id.isEmpty()) id = attribution.value("turn_id").toString();
                 auto timestamp = QDateTime::fromString(event.value("timestamp").toString(), Qt::ISODateWithMs);
-                if (!id.isEmpty() && timestamp.isValid()) events.insert(id, timestamp.toMSecsSinceEpoch());
+                if (!id.isEmpty() && timestamp.isValid()) events.insert(path + ":" + id, timestamp.toMSecsSinceEpoch());
             }
             offsets.insert(path, double(file.pos()));
+            file.seek(0);
+            const qint64 newPrefixBytes = qMin(qint64(4096), file.size());
+            const QString newPrefix = QString::fromLatin1(QCryptographicHash::hash(file.read(newPrefixBytes), QCryptographicHash::Sha256).toHex());
+            identities.insert(path, QJsonObject{{"prefix", newPrefix}, {"prefix_bytes", double(newPrefixBytes)}, {"modified", double(info.lastModified().toMSecsSinceEpoch())}});
         }
     }
+    // Keep recent IDs for deduplication while allowing old session logs to be replayed.
+    const qint64 cutoff = QDateTime(today.addDays(-2), QTime(0, 0)).toMSecsSinceEpoch();
+    for (const auto &key : events.keys()) if (events.value(key).toDouble() < cutoff) events.remove(key);
     int count = 0;
     qint64 last = 0;
     for (auto it = events.begin(); it != events.end(); ++it) {
@@ -92,13 +127,15 @@ int main(int argc, char **argv) {
     }
     int running = 0;
     for (const auto &key : active.keys()) {
-        QFileInfo log(active.value(key).toString());
+        const auto entry = active.value(key).toObject();
+        QFileInfo log(entry.value("path").toString());
         // An abandoned session must not keep the animation running indefinitely.
-        if (!log.exists() || log.lastModified().secsTo(QDateTime::currentDateTime()) > 300) active.remove(key);
+        if (!log.exists() || QDateTime::currentMSecsSinceEpoch() - qint64(entry.value("seen").toDouble()) > 300000) active.remove(key);
         else ++running;
     }
     state.insert("active", active);
-    state.insert("activity_version", 1);
+    state.insert("activity_version", 3);
+    state.insert("files", identities);
     state.insert("events", events);
     state.insert("offsets", offsets);
     state.insert("ml_per_prompt", rate);
