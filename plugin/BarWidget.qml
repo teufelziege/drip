@@ -12,11 +12,13 @@ BarWidget {
     property bool failed: false
     property bool initialized: false
     property bool splash: false
+    property bool pendingRefresh: false
     readonly property bool agentsRunning: !failed && (stats.running || 0) > 0
     readonly property bool opened: panel.open
     function open() { panel.open = true }
     function close() { panel.open = false }
-    function refresh() { if (!reader.running) reader.running = true }
+    function refresh() { if (reader.running || adjustment.running) pendingRefresh = true; else reader.running = true }
+    function drainRefresh() { if (pendingRefresh && !reader.running && !adjustment.running) { pendingRefresh = false; reader.running = true } }
     function volume(n) { return Commons.I18n.formatNumber(n, n < 10 ? 2 : 1) + " mL" }
     Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
     Process {
@@ -32,13 +34,13 @@ BarWidget {
                 } catch (e) { root.failed = true }
             }
         }
-        onExited: function(code) { if (code !== 0) root.failed = true }
+        onExited: function(code) { if (code !== 0) root.failed = true; root.drainRefresh() }
     }
     Process {
         id: adjustment
         property real rate: 0.32
         command: [Qt.resolvedUrl("drip").toString().replace(/^file:\/\//, ""), "--rate", rate.toFixed(2)]
-        onExited: root.refresh()
+        onExited: { root.pendingRefresh = true; root.drainRefresh() }
     }
     Timer { interval: 3000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
     Timer { id: splashTimer; interval: 650; onTriggered: root.splash = false }
