@@ -65,11 +65,15 @@ int main(int argc, char **argv) {
             if (!file.open(QIODevice::ReadOnly)) { ++unreadable; continue; }
             qint64 offset = qint64(offsets.value(path).toDouble());
             const QFileInfo info(file);
-            const QString identity = QString::number(info.size()) + ":" + QString::number(info.lastModified().toMSecsSinceEpoch());
+            
             const QJsonObject previous = identities.value(path).toObject();
             // A changed prefix catches same-size replacements; metadata detects shrinkage.
             file.seek(0);
-            const QString prefix = QString::fromLatin1(QCryptographicHash::hash(file.read(4096), QCryptographicHash::Sha256).toHex());
+            // Hash only the previously observed prefix. Appending to a short log
+            // must not look like replacement of its existing contents.
+            const qint64 prefixBytes = previous.contains("prefix_bytes")
+                ? qint64(previous.value("prefix_bytes").toDouble()) : qMin(qint64(4096), file.size());
+            const QString prefix = QString::fromLatin1(QCryptographicHash::hash(file.read(prefixBytes), QCryptographicHash::Sha256).toHex());
             if (offset > file.size() || (previous.contains("prefix") && previous.value("prefix").toString() != prefix)
                 || (previous.contains("modified") && info.lastModified().toMSecsSinceEpoch() < previous.value("modified").toDouble())) {
                 offset = 0;
@@ -100,7 +104,10 @@ int main(int argc, char **argv) {
                 if (!id.isEmpty() && timestamp.isValid()) events.insert(id, timestamp.toMSecsSinceEpoch());
             }
             offsets.insert(path, double(file.pos()));
-            identities.insert(path, QJsonObject{{"prefix", prefix}, {"modified", double(info.lastModified().toMSecsSinceEpoch())}});
+            file.seek(0);
+            const qint64 newPrefixBytes = qMin(qint64(4096), file.size());
+            const QString newPrefix = QString::fromLatin1(QCryptographicHash::hash(file.read(newPrefixBytes), QCryptographicHash::Sha256).toHex());
+            identities.insert(path, QJsonObject{{"prefix", newPrefix}, {"prefix_bytes", double(newPrefixBytes)}, {"modified", double(info.lastModified().toMSecsSinceEpoch())}});
         }
     }
     // Keep recent IDs for deduplication while allowing old session logs to be replayed.
