@@ -12,4 +12,4 @@ jobs:
       - name: Build
         run: ./bin/build
       - name: Run counter tests
-        run: python3 tests/test_counter.py
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
