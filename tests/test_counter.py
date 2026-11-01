@@ -54,7 +54,7 @@ class CounterTests(unittest.TestCase):
             replacement.replace(log)
             self.assertEqual(run()['prompts'], 2)
             saved = json.loads(state.read_text())
-            self.assertEqual(saved['activity_version'], 2)
+            self.assertEqual(saved['activity_version'], 3)
             self.assertIn('files', saved)
             self.assertNotIn('first', saved['active'])
             self.assertEqual(run()['prompts'], 2)
