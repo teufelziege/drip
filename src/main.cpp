@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
     QJsonObject events = state.value("events").toObject();
     QJsonObject active = state.value("active").toObject();
     // Replay once when upgrading so existing unfinished turns are discovered.
-    if (state.value("activity_version").toInt() != 2) { offsets = {}; identities = {}; active = {}; }
+    if (state.value("activity_version").toInt() != 3) { offsets = {}; identities = {}; active = {}; }
     const auto today = QDate::currentDate();
     int unreadable = 0;
     // Old conversations can receive new turns, so discover all files but read only appended bytes.
@@ -80,6 +80,7 @@ int main(int argc, char **argv) {
                 for (const auto &key : active.keys()) if (active.value(key).toObject().value("path").toString() == path) active.remove(key);
             }
             if (!file.seek(offset)) { ++unreadable; continue; }
+            const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
             while (!file.atEnd()) {
                 qint64 start = file.pos();
                 QByteArray line = file.readLine();
@@ -95,13 +96,18 @@ int main(int argc, char **argv) {
                     if (!activityId.isEmpty()) active.remove(path + ":" + activityId);
                     else { /* An unidentifiable completion must not terminate unrelated turns. */ }
                 }
-                if (kind == "task_started" && attribution.value("turn_trigger") != "guardian_review" && !activityId.isEmpty()) active.insert(path + ":" + activityId, QJsonObject{{"path", path}, {"seen", double(QDateTime::currentMSecsSinceEpoch())}});
+                if (kind == "task_started" && attribution.value("turn_trigger") != "guardian_review" && !activityId.isEmpty()) active.insert(path + ":" + activityId, QJsonObject{{"path", path}, {"seen", double(nowMs)}});
+                else if (!activityId.isEmpty() && active.contains(path + ":" + activityId) && kind != "task_complete" && kind != "turn_aborted" && kind != "task_aborted") {
+                    auto entry = active.value(path + ":" + activityId).toObject();
+                    entry.insert("seen", double(nowMs));
+                    active.insert(path + ":" + activityId, entry);
+                }
                 if (kind != "task_started" || attribution.value("turn_trigger") != "user") continue;
                 if (!attribution.value("initiating_agent_path").isNull() && !attribution.value("initiating_agent_path").toString().isEmpty()) continue;
                 QString id = payload.value("turn_id").toString();
                 if (id.isEmpty()) id = attribution.value("turn_id").toString();
                 auto timestamp = QDateTime::fromString(event.value("timestamp").toString(), Qt::ISODateWithMs);
-                if (!id.isEmpty() && timestamp.isValid()) events.insert(id, timestamp.toMSecsSinceEpoch());
+                if (!id.isEmpty() && timestamp.isValid()) events.insert(path + ":" + id, timestamp.toMSecsSinceEpoch());
             }
             offsets.insert(path, double(file.pos()));
             file.seek(0);
@@ -128,7 +134,7 @@ int main(int argc, char **argv) {
         else ++running;
     }
     state.insert("active", active);
-    state.insert("activity_version", 2);
+    state.insert("activity_version", 3);
     state.insert("files", identities);
     state.insert("events", events);
     state.insert("offsets", offsets);
