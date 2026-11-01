@@ -73,7 +73,7 @@ class CounterTests(unittest.TestCase):
             data=json.loads(state.read_text())
             for entry in data['active'].values(): entry['seen']=0
             state.write_text(json.dumps(data))
-            log.write_text(log.read_text()+'{}\\n')
+            log.write_text(log.read_text()+'{}\n')
             self.assertEqual(json.loads(subprocess.check_output(cmd))['running'],0)
 
 if __name__=='__main__': unittest.main()
