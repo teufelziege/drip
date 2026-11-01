@@ -1,4 +1,4 @@
-import json, subprocess, tempfile, unittest
+import json, subprocess, tempfile, unittest, os, time
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 BINARY = str(Path(__file__).resolve().parents[1] / 'build/drip')
@@ -35,4 +35,45 @@ class CounterTests(unittest.TestCase):
             state=root/'state.json'; state.write_text('broken')
             self.assertNotEqual(subprocess.run(cmd,capture_output=True).returncode,0)
             self.assertEqual(state.read_text(),'broken')
+    def test_replaced_log_and_retention(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); sessions = root/'sessions'; sessions.mkdir()
+            log = sessions/'log.jsonl'
+            state = root/'state.json'
+            cmd = [BINARY, '--sessions', str(sessions), '--state', str(state)]
+            def event(identifier, when):
+                return json.dumps({'type':'event_msg','timestamp':when.isoformat(timespec='milliseconds'),
+                    'payload':{'type':'task_started','turn_id':identifier,
+                    'turn_attribution':{'turn_trigger':'user'}}})+'\\n'
+            now = datetime.now(timezone.utc)
+            log.write_text(event('first', now))
+            def run(): return json.loads(subprocess.check_output(cmd))
+            self.assertEqual(run()['prompts'], 1)
+            replacement = sessions/'replacement'
+            replacement.write_text(event('second', now) + ' '*200 + '\\n')
+            replacement.replace(log)
+            self.assertEqual(run()['prompts'], 2)
+            saved = json.loads(state.read_text())
+            self.assertEqual(saved['activity_version'], 2)
+            self.assertIn('files', saved)
+            self.assertNotIn('first', saved['active'])
+            self.assertEqual(run()['prompts'], 2)
+
+    def test_stale_activity_is_per_turn(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); sessions=root/'sessions'; sessions.mkdir()
+            log=sessions/'log.jsonl'
+            now=datetime.now(timezone.utc)
+            log.write_text(json.dumps({'type':'event_msg','timestamp':now.isoformat(),
+                'payload':{'type':'task_started','turn_id':'one',
+                'turn_attribution':{'turn_trigger':'user'}}})+'\\n')
+            state=root/'state.json'
+            cmd=[BINARY,'--sessions',str(sessions),'--state',str(state)]
+            self.assertEqual(json.loads(subprocess.check_output(cmd))['running'],1)
+            data=json.loads(state.read_text())
+            for entry in data['active'].values(): entry['seen']=0
+            state.write_text(json.dumps(data))
+            log.write_text(log.read_text()+'{}\\n')
+            self.assertEqual(json.loads(subprocess.check_output(cmd))['running'],0)
+
 if __name__=='__main__': unittest.main()
