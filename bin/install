@@ -28,7 +28,7 @@ if previous.exists(): shutil.rmtree(previous)
 backup=p.with_name('shell.json.bak.drip.'+datetime.now().strftime('%Y%m%d-%H%M%S'))
 backup.write_bytes(original)
 temporary=p.with_name('shell.json.drip.tmp')
-temporary.write_text(json.dumps(s,indent=2)+'\\n')
+temporary.write_text(json.dumps(s,indent=2)+'\n')
 moved=False
 try:
     if target.exists():
