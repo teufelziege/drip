@@ -34,13 +34,13 @@ BarWidget {
                 } catch (e) { root.failed = true }
             }
         }
-        onExited: function(code) { if (code !== 0) root.failed = true; root.drainRefresh() }
+        onExited: function(code) { if (code !== 0) root.failed = true; Qt.callLater(root.drainRefresh) }
     }
     Process {
         id: adjustment
         property real rate: 0.32
         command: [Qt.resolvedUrl("drip").toString().replace(/^file:\/\//, ""), "--rate", rate.toFixed(2)]
-        onExited: { root.pendingRefresh = true; root.drainRefresh() }
+        onExited: { root.pendingRefresh = true; Qt.callLater(root.drainRefresh) }
     }
     Timer { interval: 3000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.refresh() }
     Timer { id: splashTimer; interval: 650; onTriggered: root.splash = false }
