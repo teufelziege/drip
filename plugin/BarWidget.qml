@@ -13,12 +13,13 @@ BarWidget {
     property bool initialized: false
     property bool splash: false
     property bool pendingRefresh: false
+    property bool responseValid: false
     readonly property bool agentsRunning: !failed && (stats.running || 0) > 0
     readonly property bool opened: panel.open
     function open() { panel.open = true }
     function close() { panel.open = false }
-    function refresh() { if (reader.running || adjustment.running) pendingRefresh = true; else reader.running = true }
-    function drainRefresh() { if (pendingRefresh && !reader.running && !adjustment.running) { pendingRefresh = false; reader.running = true } }
+    function refresh() { if (reader.running || adjustment.running) pendingRefresh = true; else { responseValid = false; reader.running = true } }
+    function drainRefresh() { if (pendingRefresh && !reader.running && !adjustment.running) { pendingRefresh = false; responseValid = false; reader.running = true } }
     function volume(n) { return Commons.I18n.formatNumber(n, n < 10 ? 2 : 1) + " mL" }
     Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
     Process {
@@ -30,11 +31,11 @@ BarWidget {
                     var next = JSON.parse(text)
                     if (typeof next.prompts !== "number" || typeof next.ml !== "number") throw new Error("invalid")
                     if (root.initialized && next.last > root.stats.last) { root.splash = true; splashTimer.restart() }
-                    root.stats = next; root.initialized = true; root.failed = false
-                } catch (e) { root.failed = true }
+                    root.stats = next; root.initialized = true; root.responseValid = true
+                } catch (e) { root.responseValid = false; root.failed = true }
             }
         }
-        onExited: function(code) { if (code !== 0) root.failed = true; Qt.callLater(root.drainRefresh) }
+        onExited: function(code) { root.failed = code !== 0 || !root.responseValid; Qt.callLater(root.drainRefresh) }
     }
     Process {
         id: adjustment
