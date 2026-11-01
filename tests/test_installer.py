@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = (ROOT / "bin/install").read_text()
-SCRIPT = INSTALLER.split("python3 - <<'PY'\\n", 1)[1].split("\\nPY", 1)[0]
+SCRIPT = INSTALLER.split("python3 - <<'PY'\n", 1)[1].split("\nPY", 1)[0]
 
 
 class InstallerTests(unittest.TestCase):
@@ -33,7 +33,7 @@ Path.replace = fail_shell_swap
         config = home / ".config/omarchy"
         config.mkdir(parents=True)
         shell = config / "shell.json"
-        original = '{"bar":{"layout":{"centerBegin":[]}}}\\n'
+        original = '{"bar":{"layout":{"centerBegin":[]}}}\n'
         shell.write_text(original)
         work = root / "work"
         (work / "plugin").mkdir(parents=True)
