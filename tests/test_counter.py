@@ -83,7 +83,7 @@ class CounterTests(unittest.TestCase):
             def record(kind, identifier, trigger='user'):
                 return json.dumps({'type':'event_msg','timestamp':now.isoformat(),
                     'payload':{'type':kind,'turn_id':identifier,
-                    'turn_attribution':{'turn_trigger':trigger}}})+'\\n'
+                    'turn_attribution':{'turn_trigger':trigger}}})+'\n'
             a=sessions/'a.jsonl'; b=sessions/'b.jsonl'
             a.write_text(record('task_started','shared'))
             b.write_text(record('task_started','shared'))
@@ -109,7 +109,7 @@ class CounterTests(unittest.TestCase):
             def record(kind, identifier):
                 return json.dumps({'type':'event_msg','timestamp':now,
                     'payload':{'type':kind,'turn_id':identifier,
-                    'turn_attribution':{'turn_trigger':'user'}}})+'\\n'
+                    'turn_attribution':{'turn_trigger':'user'}}})+'\n'
             log.write_text(record('task_started','first'))
             state=root/'state.json'
             cmd=[BINARY,'--sessions',str(sessions),'--state',str(state)]
@@ -142,7 +142,7 @@ class CounterTests(unittest.TestCase):
             def event(identifier, moment):
                 return json.dumps({'type':'event_msg','timestamp':moment.isoformat(),
                     'payload':{'type':'task_started','turn_id':identifier,
-                    'turn_attribution':{'turn_trigger':'user'}}})+'\\n'
+                    'turn_attribution':{'turn_trigger':'user'}}})+'\n'
             log.write_text(event('today',now)+event('yesterday',now-timedelta(days=1))
                            +event('old',now-timedelta(days=10)))
             state=root/'state.json'
