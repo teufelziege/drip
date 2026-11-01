@@ -8,6 +8,16 @@ The droplet animates while detected Codex turns are active and perks up when a n
 
 > **Not a water meter.** Drip estimates water use from a configurable per-prompt assumption; it does not measure data-center consumption or establish the footprint of your specific Codex workload.
 
+## Screenshots
+
+**Compact bar widget** — a small droplet and today's estimated water use in the Omarchy bar.
+
+![Drip compact bar widget showing estimated water use](drip-bar.png)
+
+**Expanded detail panel** — the droplet, daily prompt count, 250 mL glass gauge, and adjustable estimate.
+
+![Drip expanded panel showing daily water estimate and controls](drip-panel.png)
+
 ## What it shows
 
 - **Today's prompts:** qualifying user-initiated Codex turns found in local session logs.
